@@ -1,0 +1,4 @@
+biopython==1.83
+pytest==8.3.3
+matplotlib==3.7.5
+# obabel
