@@ -9,6 +9,7 @@ from Bio.PDB.Residue import Residue
 from .biodata import HYDROPHOBIC
 
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -23,7 +24,7 @@ class GeometricResidue:
         
         self.geom = None
         self.in_membrane = None
-        self.proj = None
+        self._proj = None
     
     def __getattr__(self, name: str) -> Any:
         return getattr(self.res, name)
@@ -31,18 +32,29 @@ class GeometricResidue:
     def is_hydrophobic(self) -> bool:
         return self.res.resname in HYDROPHOBIC
     
+    def project(self, vector: np.ndarray) -> float:
+        proj = np.dot(self.coord, vector)
+        self._proj = proj
+        return proj
+    
     def __repr__(self):
         return f"<GeometricResidue {self.resname} resseq={self.res.get_id()[1]} geo={self.geom}>"
     
 class GeometricModel:
-    def __init__(self, model: Model):
+    def __init__(self, model: Model, normal:Optional[np.ndarray]=None):
         self.model = model
-        self.residues = []
+        
+        if normal is None:
+            self.normal = calc_symmetry_axis(model)
+        
+        # project the residues onto the normal vector and identify their structural properties (straight, turn, or chain-end)
+        self.residues = self._init_geometric_residues(self.normal)
         
     def __getattr__(self, name: str):
         return getattr(self.model, name)
     
-    def proj_geometric_residues(self, projection_ax: np.ndarray):
+    def _init_geometric_residues(self, projection_ax: np.ndarray):
+        residues = []
         for chain in self.model:
             ca_coords = get_CA_coords(chain)
             
@@ -58,7 +70,7 @@ class GeometricModel:
             projected_ca_coords = np.matmul(ca_coords, projection_ax)
             
             for i, res in enumerate(indexed_residues.values()):
-                res.proj = projected_ca_coords[i]
+                res._proj = projected_ca_coords[i]
             
             # TODO: How to handle non continuous chain?
             for res_id in indexed_residues:
@@ -68,178 +80,30 @@ class GeometricModel:
                 
                 if pre_res is None or pos_res is None:
                     res.geom = "end"
-                elif pre_res.proj < res.proj and res.proj < pos_res.proj:
+                elif pre_res._proj < res._proj and res._proj < pos_res._proj:
                     res.geom = "straight"
                 else:
                     res.geom = "turn"
                 
-                self.residues.append(res)
-
-# class Plane:
-#     def __init__(self, normal, pivot):
-#         self.normal = normal
-#         self.pivot = pivot
-
-class ProteinSlicer:
-    def __init__(
-        self, 
-        model: GeometricModel, 
-        normal: np.ndarray, 
-        width:Optional[float]=None, 
-        pivot1: Optional[np.ndarray]=None, 
-        pivot2: Optional[np.ndarray]=None
-        ):
-        self.model = model
-        self.normal = normal / np.linalg.norm(normal)
-        
-        # project the residues onto the normal vector and identify their structural properties (straight, turn, or chain-end)
-        self.model.proj_geometric_residues(self.normal)
-        
-        if pivot1 is not None:
-            self.pivot1 = pivot1
-            if pivot2 is not None:
-                self.pivot2 = pivot2
-                self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
-            elif width is not None:
-                self.pivot2 = pivot1 + width * self.normal
-                self.width = width
-            else:
-                raise ValueError("When `pivot1` is provided, either `width` or `pivot2` must be provided")
-            
-        elif width is not None:
-            self.width = width
-            self.pivot_init()
-
-        else:
-            raise ValueError("Either `pivot1` or `width` must be provided")
-        
-        # self.in_membrane_residues = None
-        self.fit_sliced_residues()
-        
-        
-        # self.plane1 = Plane(self.normal, self.pivot1)
-        # self.plane2 = Plane(self.normal, self.pivot2)
-    def __repr__(self):
-        return f"<ProteinSlice normal={self.normal} pivot1={self.pivot1} pivot2={self.pivot2} width={self.width}>"
-    
-    @property
-    def proj_pivots(self):
-        return np.dot(self.pivot1, self.normal), np.dot(self.pivot2, self.normal)
-    
-    @property
-    def in_membrane_residues(self):
-        return [res for res in self.model.residues if res.in_membrane]
-    
-    def get_normal_boundaries(self):
-        proj_coords = np.array([res.proj for res in self.model.residues])
-        lowest_res_id = np.argmin(proj_coords)
-        lowest_res_coord = self.model.residues[lowest_res_id].coord
-        lower_bound = np.dot(lowest_res_coord, self.normal)
-        
-        highest_res_id = np.argmax(proj_coords)
-        highest_res_coord = self.model.residues[highest_res_id].coord
-        higher_bound = np.dot(highest_res_coord, self.normal)
-        
-        return lower_bound, higher_bound
-    
-    def pivot_init(self):
-        lower_bound, _ = self.get_normal_boundaries()
-        
-        # the first pivot lies lower than the lowest residues by 1A
-        self.pivot1 = self.normal * (lower_bound -1)
-        self.pivot2 = self.pivot1 + self.width*self.normal
-    
-    def fit_sliced_residues(self):
-        self.residues = []
-        proj_pivot1 = np.dot(self.pivot1, self.normal)
-        proj_pivot2 = np.dot(self.pivot2, self.normal)
-        for res in self.model.residues:
-            proj_res = np.dot(res.coord, self.normal)
-            if proj_pivot1 < proj_res < proj_pivot2 or proj_pivot2 < proj_res < proj_pivot1:
-                res.in_membrane = True
-            else:
-                res.in_membrane = False
-    
-    def Q_score(self):
-        return self.calc_Q_score(self.in_membrane_residues, self.width)
-    
-    def hydrophobic_factor(self):
-        return self.calc_hydrophobic_factor(self.in_membrane_residues)
-    
-    def structure_factor(self):
-        return self.calc_structure_factor(self.in_membrane_residues)
-    
-    def move_slice(self, step: float):
-        self.pivot1 = self.pivot1 + step * self.normal
-        self.pivot2 = self.pivot2 + step * self.normal
-        self.fit_sliced_residues()
-        
-    def expand_slice(self, step: float):
-        self.pivot1 = self.pivot1 - step * self.normal
-        self.pivot2 = self.pivot2 + step * self.normal
-        
-        self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
-        self.fit_sliced_residues()
-        
-    def move_pivot(self, step1: Optional[np.ndarray]=None, step2: Optional[np.ndarray]=None):
-        if step1 is not None:
-            self.pivot1 = self.pivot1 + step1*self.normal
-        if step2 is not None:
-            self.pivot2 = self.pivot2 + step2*self.normal
-        self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
-        self.fit_sliced_residues()
-    
-    def set_pivots(self, pivot1: Optional[np.ndarray]=None, pivot2: Optional[np.ndarray]=None):
-        if pivot1 is not None:
-            self.pivot1 = pivot1
-        if pivot2 is not None:
-            self.pivot2 = pivot2
-        self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
-        self.fit_sliced_residues()
-            
-    def n_crossing_segments(self):
-        n_cross = 0
-        for i in range(len(self.model.residues) - 1):
-            res1 = self.model.residues[i]
-            res2 = self.model.residues[i+1]
-            
-            if (res1.in_membrane and not res2.in_membrane) or (not res1.in_membrane and res2.in_membrane):
-                n_cross += 1
-        return n_cross
-            
-        
-    # def rotate_normal
-    
-    @classmethod
-    def calc_hydrophobic_factor(cls, residues: List[GeometricResidue]):
-        return sum(res.sasa for res in residues if res.is_hydrophobic())
-    
-    @classmethod
-    def calc_structure_factor(cls, residues: List[GeometricResidue]):
-        straight_count = 0
-        turn_count = 0
-        end_count = 0
-        
-        for res in residues:
-            if res.geom == "straight":
-                straight_count += 1
-            elif res.geom == "turn":
-                turn_count += 1
-            elif res.geom == "end":
-                end_count += 1
-        
-        straight_rate = straight_count / len(residues)
-        turn_rate = 1 - turn_count / len(residues)
-        end_rate = 1 - end_count / len(residues)
-        
-        return straight_rate * turn_rate * end_rate
-    
-    @classmethod
-    def calc_Q_score(cls, residues: List[GeometricResidue], width: float):
-        return cls.calc_hydrophobic_factor(residues) * cls.calc_structure_factor(residues) / width
-    
+                residues.append(res)
+        return residues
         
 
+def sphere_sample(n_points: int, radius: float=1, 
+                  phi_range: Tuple[float, float]=(0, 2*np.pi),
+                  theta_range: Tuple[float, float]=(0, np.pi),
+                  seed: Optional[int]=None):
+    if seed is not None:
+        np.random.seed(seed)
+    phi = np.random.uniform(*phi_range, n_points)
+    theta = np.random.uniform(*theta_range, n_points)
+    
+    x = radius * np.sin(theta) * np.cos(phi)
+    y = radius * np.sin(theta) * np.sin(phi)
+    z = radius * np.cos(theta)
+    
+    return np.array([x, y, z]).T
+        
 def calc_center_of_mass(obj: Union[Model, Chain], weight_by_mass=False, CA_only=True):
     mass = 0
     center = np.zeros(3)
