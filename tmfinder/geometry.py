@@ -44,8 +44,7 @@ class GeometricModel:
     def __init__(self, model: Model, normal:Optional[np.ndarray]=None):
         self.model = model
         
-        if normal is None:
-            self.normal = calc_symmetry_axis(model)
+        self.normal = normal if normal is not None else calc_symmetry_axis(model)
         
         # project the residues onto the normal vector and identify their structural properties (straight, turn, or chain-end)
         self.residues = self._init_geometric_residues(self.normal)
@@ -103,6 +102,19 @@ def sphere_sample(n_points: int, radius: float=1,
     z = radius * np.cos(theta)
     
     return np.array([x, y, z]).T
+
+def fibonacci_sphere(samples=1000): 
+    points = [] 
+    phi = np.pi * (3. - np.sqrt(5.)) # golden angle in radians 
+    for i in range(samples): 
+        y = 1 - (i / float(samples - 1)) * 2 # y goes from 1 to -1 
+        radius = np.sqrt(1 - y * y) # radius at y 
+        theta = phi * i # golden angle increment 
+        x = np.cos(theta) * radius 
+        z = np.sin(theta) * radius 
+        points.append([x, y, z])
+        
+    return np.array(points)
         
 def calc_center_of_mass(obj: Union[Model, Chain], weight_by_mass=False, CA_only=True):
     mass = 0
@@ -124,6 +136,13 @@ def get_CA_coords(obj: Union[Model, Chain]):
         if residue.has_id("CA"):
             ca_coords.append(residue["CA"].get_coord())
     return np.array(ca_coords)
+
+def get_atom_coords(obj: Union[Model, Chain]):
+    atom_coords = []
+    for residue in obj.get_residues():
+        for atom in residue:
+            atom_coords.append(atom.get_coord())
+    return np.array(atom_coords)
 
 def calc_symmetry_axis(model):
     calpha_coords = get_CA_coords(model)

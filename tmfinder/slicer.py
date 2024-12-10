@@ -7,13 +7,21 @@ from Bio.PDB.Chain import Chain
 from Bio.PDB.Residue import Residue
 
 from .biodata import HYDROPHOBIC
-from .geometry import GeometricModel, GeometricResidue, calc_symmetry_axis, sphere_sample, get_CA_coords
+from .geometry import (
+    GeometricModel, 
+    GeometricResidue, 
+    calc_symmetry_axis, 
+    sphere_sample, 
+    fibonacci_sphere, 
+    get_CA_coords,
+    get_atom_coords
+)
+from .utils import init_logger
 
 import logging
 from tqdm import tqdm
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+logger = init_logger(__name__)
 
 class ProteinSlicer:
     def __init__(
@@ -24,12 +32,12 @@ class ProteinSlicer:
         pivot2: Optional[np.ndarray]=None,
         normal: Optional[np.ndarray]=None, 
         step: float=0.5,
-        n_normals_sample: int=10000,
+        n_normals_sample: int=5000,
         seed: Optional[int]=None
         ):
         self.model_ = model
         self.model = GeometricModel(model, normal)
-        normal = normal if normal is not None else calc_symmetry_axis(model)
+        normal = self.model.normal
         self.normal_ = normal
         self.normal = normal / np.linalg.norm(normal)
         
@@ -60,12 +68,15 @@ class ProteinSlicer:
         self.step = step
         self.n_normals_sample = n_normals_sample
         self.seed = seed
+
         if self.seed is not None:
             np.random.seed(self.seed)        
         # self.in_membrane_residues = None
-                
+        # self.anchors = None
+        # self.sliced_q_scores = None
+        self.slice()
         
-        self.fit_sliced_residues()
+        # self._fit_sliced_residues()
         
         
     def __repr__(self):
@@ -99,13 +110,16 @@ class ProteinSlicer:
         return lower_bound, higher_bound
     
     def init_pivot(self, lower_bound: float, width: float):       
-        # the first pivot lies lower than the lowest residues by 1A
-        self.pivot1 = self.normal * (lower_bound -1)
-        self.pivot2 = self.pivot1 + width*self.normal
-        self._projected_pivot1 = np.dot(self.pivot1, self.normal)
-        self._projected_pivot2 = np.dot(self.pivot2, self.normal)
+        # self.pivot1 = self.normal * lower_bound
+        # self.pivot2 = self.pivot1 + width*self.normal
+        # self._projected_pivot1 = np.dot(self.pivot1, self.normal)
+        # self._projected_pivot2 = np.dot(self.pivot2, self.normal)
+        
+        # self._fit_sliced_residues()
+        self.pivot1 = self.anchors[0]
+        self.pivot2 = self.anchors[self.width]
     
-    def fit_sliced_residues(self):
+    def _fit_sliced_residues(self):
         proj_pivot1 = self._projected_pivot1
         proj_pivot2 = self._projected_pivot2
         for res, proj_coords in zip(self.model.residues, self._projected_CA_coords):
@@ -128,9 +142,11 @@ class ProteinSlicer:
         self.set_pivots(best_pivot1, best_pivot2)
     
     def fit_normal(self):
-        sample_normals = sphere_sample(self.n_normals_sample,
-                                       theta_range=(0, np.pi/2),
-        )
+        # sample_normals = sphere_sample(self.n_normals_sample,
+        #                                theta_range=(0, np.pi/2),
+        # )
+        # sample_normals = np.concatenate([sample_normals, self.normal.reshape(1, -1)], axis=0)
+        sample_normals = fibonacci_sphere(self.n_normals_sample)
         sample_normals = np.concatenate([sample_normals, self.normal.reshape(1, -1)], axis=0)
         best_args = None
         best_q_score = None
@@ -142,7 +158,7 @@ class ProteinSlicer:
                 best_q_score = self.Q_score
                 best_args = (normal, self.pivot1, self.pivot2)
         
-        self.set_normal(best_args[0])
+        self.set_normal(best_args[0], init_pivot=False)
         self.set_pivots(best_args[1], best_args[2])
                 
     @property
@@ -163,15 +179,31 @@ class ProteinSlicer:
         self._projected_pivot1 = np.dot(self.pivot1, self.normal)
         self._projected_pivot2 = np.dot(self.pivot2, self.normal)
         
-        self.fit_sliced_residues()
+        self._fit_sliced_residues()
         
-    def expand_slice(self, step: float):
-        self.pivot1 = self.pivot1 - step * self.normal
-        self.pivot2 = self.pivot2 + step * self.normal
-        self._projected_pivot1 = np.dot(self.pivot1, self.normal)
-        self._projected_pivot2 = np.dot(self.pivot2, self.normal)
-        # self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
-        self.fit_sliced_residues()
+    def expand_pivots(self, step: float=0.5):
+        atom_coords = get_atom_coords(self.model)
+        proj_coords = np.dot(atom_coords, self.normal)
+        atom_lowest = np.min(proj_coords)
+        atom_highest = np.max(proj_coords)
+        
+        cur_n_segments = self.n_crossing_segments()
+        while self.n_crossing_segments() == cur_n_segments:
+            self.move_pivot(step1=-step)
+            if self._projected_pivot1 < atom_lowest:
+                logger.warning("Pivot1 reached the lowest atom. Stopping.")
+                break
+        self.move_pivot(step1=step)
+        
+        cur_n_segments = self.n_crossing_segments()
+        while self.n_crossing_segments() == cur_n_segments:
+            self.move_pivot(step2=step)
+            if self._projected_pivot2 > atom_highest:
+                logger.warning("Pivot2 reached the highest atom. Stopping.")
+                break
+        self.move_pivot(step2=-step)
+        
+        self._fit_sliced_residues()
         
     def move_pivot(self, step1: Optional[np.ndarray]=None, step2: Optional[np.ndarray]=None):
         if step1 is not None:
@@ -181,7 +213,7 @@ class ProteinSlicer:
         # self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
         self._projected_pivot1 = np.dot(self.pivot1, self.normal)
         self._projected_pivot2 = np.dot(self.pivot2, self.normal)
-        self.fit_sliced_residues()
+        self._fit_sliced_residues()
     
     def set_pivots(self, pivot1: Optional[np.ndarray]=None, pivot2: Optional[np.ndarray]=None):
         if pivot1 is not None:
@@ -191,16 +223,18 @@ class ProteinSlicer:
         # self.width = np.dot(self.pivot2 - self.pivot1, self.normal)
         self._projected_pivot1 = np.dot(self.pivot1, self.normal)
         self._projected_pivot2 = np.dot(self.pivot2, self.normal)
-        self.fit_sliced_residues()
+        self._fit_sliced_residues()
     
-    def set_normal(self, normal: np.ndarray):
+    def set_normal(self, normal: np.ndarray, init_pivot: bool=True):
         self.normal = normal / np.linalg.norm(normal)
         self._projected_CA_coords = np.dot(self._CA_coords, self.normal)
         self._lower_bound, self._higher_bound = self.get_normal_boundaries()
-        self.init_pivot(self._lower_bound, self.width)
-        self.fit_sliced_residues()
+        self.slice()
         
-        #TODO: can be optimized more
+        if init_pivot:
+            self.init_pivot(self._lower_bound, self.width)
+            self._fit_sliced_residues()
+
             
     def n_crossing_segments(self):
         n_cross = 0
@@ -214,7 +248,9 @@ class ProteinSlicer:
     
     @classmethod
     def calc_hydrophobic_factor(cls, residues: List[GeometricResidue]):
-        return sum(res.sasa for res in residues if res.is_hydrophobic())
+        hydrophobic_sum = sum(res.sasa for res in residues if res.is_hydrophobic())
+        all_sum = sum(res.sasa for res in residues)
+        return hydrophobic_sum / all_sum
     
     @classmethod
     def calc_structure_factor(cls, residues: List[GeometricResidue]):
@@ -239,3 +275,35 @@ class ProteinSlicer:
     @classmethod
     def calc_Q_score(cls, residues: List[GeometricResidue], width: float):
         return cls.calc_hydrophobic_factor(residues) * cls.calc_structure_factor(residues) / width
+    
+    
+    def slice(self):
+        """
+        Call everytime a new normal is defined.
+        """
+        sorted_res_ids = sorted(range(len(self._projected_CA_coords)), key=lambda i: self._projected_CA_coords[i])
+        
+        anchor_points = [self._lower_bound]
+        while anchor_points[-1] < self._higher_bound:
+            anchor_points.append(anchor_points[-1] + 1)
+        sliced_res_ids = []
+        cur_res_group = []
+        cur_anchor_idx = 0
+        for res_ids in sorted_res_ids:
+            if not cur_res_group:
+                cur_res_group.append(res_ids)
+                continue
+            if self._projected_CA_coords[res_ids] >= anchor_points[cur_anchor_idx] and self._projected_CA_coords[res_ids] < anchor_points[cur_anchor_idx + 1]:
+                cur_res_group.append(res_ids)
+            else:
+                sliced_res_ids.append(cur_res_group)
+                cur_res_group = [res_ids]
+                cur_anchor_idx += 1
+        
+        sliced_q_scores = []
+        for res_id_group in sliced_res_ids:
+            sliced_res = [self.model.residues[res_id] for res_id in res_id_group]
+            sliced_q_scores.append(self.calc_Q_score(sliced_res, 1))
+        
+        self.anchors = anchor_points
+        self.sliced_q_scores = sliced_q_scores

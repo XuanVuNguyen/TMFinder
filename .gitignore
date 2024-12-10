@@ -2,3 +2,6 @@
 
 env/
 *.ipynb
+*.log
+todo.md
+data/
