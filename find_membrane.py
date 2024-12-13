@@ -6,11 +6,7 @@ from Bio.PDB.PDBIO import PDBIO
 
 from tmfinder.biodata import remove_hetatm
 from tmfinder.geometry import (
-    get_CA_coords, 
     calc_symmetry_axis,
-    sphere_sample,
-    GeometricModel,
-    GeometricResidue,
     calc_center_of_mass
 )
 from tmfinder.slicer import ProteinSlicer
@@ -47,15 +43,20 @@ def main(args):
         model, 
         normal=rotation_axis, 
         width=args.width, 
-        step=args.step, 
+        # step=args.step, 
         n_normals_sample=args.n_normals,
         seed=args.rand,
     )
+    # print(slicer.anchors)
+    # print(slicer.sliced_q_scores)
+    
     slicer.fit_normal()
+    # slicer.fit_pivots()
     logger.info(f"Fitted normal: {slicer.normal}")
     logger.info(f"Fitted pivots: {slicer.pivot1}, {slicer.pivot2}")
     logger.info(f"Fitted Q score: {slicer.Q_score}")
-    slicer.expand_pivots(0.1)
+    
+    slicer.expand_pivots(0.5)
     
     model_com = calc_center_of_mass(model)
     add_atom_plane(struct[0],
@@ -84,7 +85,7 @@ if __name__ == "__main__":
     parser.add_argument("-l", "--log", type=str, help="Log file", default="tmfinder.log")
     parser.add_argument("-n", "--n_normals", type=int, default=5000, help="Number of normals to sample")
     parser.add_argument("-w", "--width", type=float, default=15, help="Width of the slicer")
-    parser.add_argument("-s", "--step", type=float, default=2, help="Step size for the slicer")
+    # parser.add_argument("-s", "--step", type=float, default=2, help="Step size for the slicer")
     parser.add_argument("-r", "--rand", type=Optional[int], default=None, help="Random seed")
     
     args = parser.parse_args()
