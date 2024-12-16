@@ -1,2 +1,0 @@
-
-# def Q_score

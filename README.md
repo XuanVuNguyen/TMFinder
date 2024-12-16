@@ -16,22 +16,24 @@ The application takes the PDB structure of a transmembrane protein as input and 
 ```bash
 .
 ├── tmfinder
-│   ├── biodata.py
-│   ├── geometry.py
-│   ├── optimize.py
-│   ├── score.py
-│   ├── slicer.py
-│   ├── utils.py
-│   └── visualization.py
-├── tmfinder.log
+│   ├── biodata.py # Reading and cleaning PDB file
+│   ├── geometry.py # Geometric operations, i.e. point sampling on a sphere; center of mass, rotational axis calculation...
+│   ├── slicer.py # Slicing the protein into two parallel planes, calculating the Q score, normal vector searching
+│   ├── utils.py # Utilities
+│   └── visualization.py # Modifying the PDB file to highlight the transmembrane region.
+├── tmfinder.log # Log file
 ├── README.md
-├── environment.yml
-├── find_membrane.py
+├── environment.yml # Installation
+└── find_membrane.py # Command line interface
 ```
 
-## Key points
+## Features
 
 The membrane is modeled as two parallel planes, defined by a normal vector and two pivot vectors.
+For each normal vector, a Q value is calculated. Q score takes into account the surface area of the hydrophobic residues and the geometry to determine the likelihood of the normal vector.
+Q score ranges from 0 to 1 with higher value means the normal vector is more likely to be the membrane normal.
+
+After the optimal normal vector is found, the two planes are expanded as much as possible such that the number of cross segments does not change. The two planes are then used to highlight the membrane region in the PDB file.
 
 ## Installation:
 
@@ -116,7 +118,3 @@ io = PDBIO()
 io.set_structure(structure)
 io.save("4qi1_membrane.pdb")
 ```
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for more information.
