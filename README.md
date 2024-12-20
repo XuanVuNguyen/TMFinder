@@ -1,15 +1,16 @@
 # TMFinder: Locating transmembrane region of proteins
 
-TMFinder is a Python implementation of the paper: [Transmembrane proteins in the Protein Data Bank: identification and classification](https://pubmed.ncbi.nlm.nih.gov/15180935/) by Gábor E Tusnády, Zsuzsanna Dosztányi, and István Simon.
-The application takes the PDB structure of a transmembrane protein as input and output a another pdb file with the membrane region highlighted by dummy atoms.
-
-<!-- Insert an image and center -->
+TMFinder is a Python implementation of the paper: [Transmembrane proteins in the Protein Data Bank: identification and classification](https://pubmed.ncbi.nlm.nih.gov/15180935/) by Gábor E Tusnády, Zsuzsanna Dosztányi, and István Simon. The purposeof this application is to find the membrane region of a transmembrane protein given only its 3D structure. The application takes the PDB structure of a transmembrane protein as input and output a another pdb file with the membrane region highlighted by dummy atoms.
 
 <p align="center">
   <img src="figs/transmembrane.png" width="500" />
 </p>
 
+## Features
 
+The membrane is modeled as two parallel planes, defined by a normal vector and two pivot vectors. For each normal vector, a Q value is calculated. Q score takes into account the surface area of the hydrophobic residues and the geometry to determine the likelihood of the normal vector. Q score ranges from 0 to 1 with higher value means the normal vector is more likely to be the membrane normal.
+
+After the optimal normal vector is found, the two planes are expanded as much as possible such that the number of cross segments does not change. The two planes are then used to highlight the membrane region in the PDB file.
 
 ## Repo structure
 
@@ -27,14 +28,6 @@ The application takes the PDB structure of a transmembrane protein as input and 
 └── find_membrane.py # Command line interface
 ```
 
-## Features
-
-The membrane is modeled as two parallel planes, defined by a normal vector and two pivot vectors.
-For each normal vector, a Q value is calculated. Q score takes into account the surface area of the hydrophobic residues and the geometry to determine the likelihood of the normal vector.
-Q score ranges from 0 to 1 with higher value means the normal vector is more likely to be the membrane normal.
-
-After the optimal normal vector is found, the two planes are expanded as much as possible such that the number of cross segments does not change. The two planes are then used to highlight the membrane region in the PDB file.
-
 ## Installation:
 
 ```bash
@@ -51,6 +44,8 @@ Simple usage:
 ```bash
 python find_membrane.py -i=4qi1.pdb -o=4qi1_membrane.pdb
 ```
+An output file `4qi1_membrane.pdb` will be created with the membrane region highlighted, and it can be visualized in PyMol.
+
 To see the full list of arguments, run:
 ```bash
 python find_membrane.py -h

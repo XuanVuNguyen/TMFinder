@@ -28,22 +28,12 @@ RESNAME_TO_FASTA = {
     "VAL": "V",
 }
 HYDROPHOBIC = ["PHE", "GLY", "ILE", "LEU", "MET", "VAL", "TRP", "TYR"]
-HYDROPHILIC = [
-    "ALA",
-    "CYS",
-    "ASP",
-    "GLU",
-    "HIS",
-    "LYS",
-    "ASN",
-    "PRO",
-    "GLN",
-    "ARG",
-    "SER",
-    "THR",
-]
+HYDROPHILIC = ["ALA", "CYS", "ASP", "GLU", "HIS", "LYS", "ASN", "PRO", "GLN", "ARG", "SER", "THR"]
 
 def remove_hetatm(structure, pdb_out=None):
+    """
+    Remove heterotatoms and residues without CA atom.
+    """
     remove_residue_ids = []
     for model in structure:
         for chain in model:

@@ -16,6 +16,9 @@ logging.basicConfig(level=logging.INFO)
 
 
 def fibonacci_sphere(samples=1000):
+    """
+    Sample evenly distributed points on a sphere surface using Fibonacci lattice.
+    """
     points = []
     phi = np.pi * (3.0 - np.sqrt(5.0))  # golden angle in radians
     for i in range(samples):
@@ -45,6 +48,9 @@ def calc_center_of_mass(obj: Union[Model, Chain], weight_by_mass=False, CA_only=
 
 
 def get_CA_coords(obj: Union[Model, Chain]):
+    """
+    Get coordinates of carbon alpha atoms.
+    """
     ca_coords = []
     for residue in obj.get_residues():
         if residue.has_id("CA"):
@@ -53,6 +59,9 @@ def get_CA_coords(obj: Union[Model, Chain]):
 
 
 def get_atom_coords(obj: Union[Model, Chain]):
+    """
+    Get coordinates of all atoms.
+    """
     atom_coords = []
     for residue in obj.get_residues():
         for atom in residue:
@@ -61,6 +70,9 @@ def get_atom_coords(obj: Union[Model, Chain]):
 
 
 def calc_symmetry_axis(model):
+    """
+    Calculate the rotational symmetry axis of a protein model.
+    """
     calpha_coords = get_CA_coords(model)
     calpha_coords = np.array(calpha_coords)
     centroid = np.mean(calpha_coords, axis=0)
